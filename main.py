@@ -2,15 +2,8 @@ import numpy as np
 import pandas as pd
 import asyncio
 
-from multiprocessing import Pool, cpu_count
-
 from timeit import default_timer as timer
 from tqdm import tqdm
-
-from multiprocessing import Pool
-
-n_cores = cpu_count
-pool = Pool()
 
 
 # Необходимо передать название файла из папки csv
@@ -25,11 +18,11 @@ def csv_write(df, name_csv):
     df.to_csv(f'csv/test_output/{name_csv}')
 
 
-async def async_part(main_df, second_df, name_col_main, name_col_second, condition_top,
+def async_part(main_df, second_df, name_col_main, name_col_second, condition_top,
                      products_from=False, from_df=pd.DataFrame(), city=False, city_df=pd.DataFrame(),
                      original_dict=dict()):
     dict_for_answer = dict()
-    for l in tqdm(second_df.index):
+    for l in second_df.index:
         # Нахождение всех index(id), соответствующим условию в основной таблице
         tmp = main_df[name_col_main].isin([second_df[name_col_second][l]])
         tmp = tmp.loc[pd.DataFrame(tmp)[name_col_main]]
@@ -90,11 +83,9 @@ async def find_top(main_df, second_df, name_col_main, name_col_second, condition
     min_point = 0
     max_point = COUNT_SLICE
     for j in tqdm(range((len(second_df) // COUNT_SLICE) + remains)):
-        task = asyncio.create_task(
-            async_part(main_df, second_df[min_point + (j * COUNT_SLICE):max_point + (j * COUNT_SLICE)],
-                       name_col_main, name_col_second, condition_top, products_from=products_from,
-                       from_df=from_df, city=city, city_df=city_df, original_dict=dict_for_answer))
-        await task
+        async_part(main_df, second_df[min_point + (j * COUNT_SLICE):max_point + (j * COUNT_SLICE)],
+                   name_col_main, name_col_second, condition_top, products_from=products_from,
+                   from_df=from_df, city=city, city_df=city_df, original_dict=dict_for_answer)
     dict_for_answer.update(dict_for_answer)
 
     names, sumaries = list(), list()
@@ -122,7 +113,7 @@ print("Чтение вводных csv-файлов...")
 start = timer()
 list_names_csv = ['t_branches', 't_cities', 't_products', 't_sales']
 dict_df_csv = dict()
-for i in list_names_csv:
+for i in tqdm(list_names_csv):
     # dict_df_csv[i[2:]] = csv_read(i, test=True)
     dict_df_csv[i[2:]] = csv_read(i)
 
@@ -150,43 +141,36 @@ end = timer()
 print(f'''Время выполнения: {end - start}
 ------------------------------------------------''')
 
-asyncio.run(find_top(main_df=sales,
-                     second_df=branches_shop,
-                     name_col_main='Филиал',
-                     name_col_second='Ссылка',
-                     condition_top='Количество',
-                     for_last_msg='Десять первых магазинов по количеству продаж'))
 
-asyncio.run(find_top(main_df=sales,
-                     second_df=branches_warehouse,
-                     name_col_main='Филиал',
-                     name_col_second='Ссылка',
-                     condition_top='Количество',
-                     for_last_msg='Десять первых складов по количеству продаж'))
+async def main():
+    await asyncio.create_task(find_top(main_df=sales, second_df=branches_shop, name_col_main='Филиал',
+                                       name_col_second='Ссылка', condition_top='Количество',
+                                       for_last_msg='Десять первых магазинов по количеству продаж'))
 
-asyncio.run(find_top(main_df=sales,
-                     second_df=products,
-                     name_col_main='Номенклатура',
-                     name_col_second='Ссылка',
-                     condition_top='Количество',
-                     products_from=True,
-                     from_df=branches_warehouse,
-                     for_last_msg='Десять самых продаваемых товаров по складам'))
+    await asyncio.create_task(find_top(main_df=sales, second_df=branches_warehouse, name_col_main='Филиал',
+                                       name_col_second='Ссылка', condition_top='Количество',
+                                       for_last_msg='Десять первых складов по количеству продаж'))
 
-asyncio.run(find_top(main_df=sales,
-                     second_df=products,
-                     name_col_main='Номенклатура',
-                     name_col_second='Ссылка',
-                     condition_top='Количество',
-                     products_from=True,
-                     from_df=branches_shop,
-                     for_last_msg='Десять самых продаваемых товаров по магазинам'))
+    await asyncio.create_task(find_top(main_df=sales, second_df=products, name_col_main='Номенклатура',
+                                       name_col_second='Ссылка', condition_top='Количество', products_from=True,
+                                       from_df=branches_warehouse,
+                                       for_last_msg='Десять самых продаваемых товаров по складам'))
 
-asyncio.run(find_top(main_df=sales,
-                     second_df=branches,
-                     name_col_main='Филиал',
-                     name_col_second='Ссылка',
-                     condition_top='Количество',
-                     city=True,
-                     city_df=cities,
-                     for_last_msg='Десять городов, в которых больше всего продавалось товаров'))
+    await asyncio.create_task(find_top(main_df=sales, second_df=products, name_col_main='Номенклатура',
+                                       name_col_second='Ссылка', condition_top='Количество', products_from=True,
+                                       from_df=branches_shop,
+                                       for_last_msg='Десять самых продаваемых товаров по магазинам'))
+
+    await asyncio.create_task(find_top(main_df=sales, second_df=branches, name_col_main='Филиал',
+                                       name_col_second='Ссылка', condition_top='Количество', city=True, city_df=cities,
+                                       for_last_msg='Десять городов, в которых больше всего продавалось товаров'))
+
+
+print('Начало выполнения алгоритмов:')
+start = timer()
+
+asyncio.run(main())
+
+end = timer()
+print(f'''Общее время выполнения: {end - start}
+------------------------------------------------''')

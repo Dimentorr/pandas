@@ -1,5 +1,7 @@
 .env
 .idea/
+test.py
+mini_tests.py
 
 
 # Byte-compiled / optimized / DLL files

@@ -2,6 +2,7 @@
 .idea/
 test.py
 mini_tests.py
+csv/
 
 
 # Byte-compiled / optimized / DLL files

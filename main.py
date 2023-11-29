@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
-import asyncio
 
 from multiprocessing import Process, cpu_count, Pool
+import matplotlib.pyplot as plt
 
 from timeit import default_timer as timer
 from tqdm import tqdm
@@ -36,12 +36,42 @@ def csv_write(df: pd.DataFrame, name_csv: str):
     :param df: имя pandas.DataFrame
     :param name_csv: имя создаваемого или перезаписываемого csv файла на содержание df
     """
-    df.to_csv(f'csv/test_output/{name_csv}')
+    df.to_csv(f'csv/test_output/{name_csv}.csv')
+
+
+def definition_class(x, Qmin, Qmax):
+    if x >= Qmax:
+        return 'Наиболее продаваемый'
+    elif x < Qmin:
+        return 'Наименее продаваемый'
+    else:
+        return 'Средне продаваемый'
+
+
+def class_products(products_df, sales_df):
+    answer = pd.DataFrame({'Номенклатура': [], 'КоличестваПродаж': [], 'КлассТовара': [], 'index': []})
+    answer['Номенклатура'] = products_df['Наименование']
+    answer['index'] = products_df.index
+    answer['КоличестваПродаж'] = (answer['index']
+                                  .apply(lambda l: int(np.sum(sales_df.loc[sales_df['Номенклатура']
+                                                          .isin([products_df['Ссылка'][l]])
+                                                          .pipe(lambda x: x.loc[pd.DataFrame(x)['Номенклатура']]
+                                                                .index)]
+                                                          ['Количество']))))
+
+    print(answer.sort_values('КоличестваПродаж')['КоличестваПродаж'].values.tolist())
+    min_quantile = answer['КоличестваПродаж'].quantile(.3)
+    max_quantile = answer['КоличестваПродаж'].quantile(.9)
+    print(f'''{min_quantile} and {max_quantile}''')
+    answer['КлассТовара'] = (answer['КоличестваПродаж']
+                             .apply(lambda x: definition_class(x, min_quantile, max_quantile)))
+
+    csv_write(answer.drop(['КоличестваПродаж', 'index'], axis=1), 'product_classes')
 
 
 def find_top(main_df: pd.DataFrame, objects_to_sort: pd.DataFrame, name_col_main: str, condition_top='Количество',
-                   name_col_linc_on_objects='Ссылка', products_from=False, from_df=pd.DataFrame(), city=False,
-                   city_df=pd.DataFrame(), len_top=10, for_last_msg=''):
+             name_col_linc_on_objects='Ссылка', products_from=False, from_df=pd.DataFrame(), city=False,
+             city_df=pd.DataFrame(), len_top=10, for_last_msg=''):
     """
     :param main_df: таблица со всей возможной информацией
     :param objects_to_sort: таблица, значения которой необходимо сортировать
@@ -84,28 +114,18 @@ def find_top(main_df: pd.DataFrame, objects_to_sort: pd.DataFrame, name_col_main
             key = objects_to_sort['Наименование'][l]
             dict_for_answer[key] = sum_count
 
-    names, sumaries = list(), list()
-    count_iter = 0
-    for k in dict(sorted(dict_for_answer.items(), key=lambda item: item[1], reverse=True)):
-        count_iter += 1
-        names.append(k)
-        sumaries.append(dict_for_answer[k])
-        if count_iter >= len_top:
-            break
-    result = {
-        'Наименование': names,
-        'Сумма': sumaries
-    }
+    result = pd.DataFrame.from_dict(dict_for_answer, orient='index').reset_index()
+    result.columns = ['Наименование', 'Количество']
     end_func = timer()
     print(f'''------------------------------------------------
 Время выполнения: {end_func - start_func}''')
     print(f'''------------------------------------------------
 {for_last_msg}
 ------------------------------------------------
-{pd.DataFrame.from_dict(result)}''')
+{result.sort_values('Количество', ascending=False).head(len_top)}''')
 
 
-def find_top_time(sales_main_df):
+def find_top_time(sales_main_df: pd.DataFrame):
     sales_data = pd.DataFrame({'weekday': [], 'hour': [], 'Количество': []})
 
     sales_data['weekday'] = (sales_main_df['Период']
@@ -117,22 +137,32 @@ def find_top_time(sales_main_df):
     data_hour = dict()
     data_weekday = dict()
     for h in range(sales_data['hour'].min(), sales_data['hour'].max() + 1):
-        data_hour[h] = np.sum(sales_data['hour'].loc[(sales_data['hour'] == h)])
+        data_hour[h] = np.sum(sales_data['Количество'].loc[(sales_data['hour'] == h)])
     for d in range(sales_data['weekday'].min(), sales_data['weekday'].max() + 1):
-        data_weekday[d] = np.sum(sales_data['weekday'].loc[(sales_data['weekday'] == d)])
+        data_weekday[d] = np.sum(sales_data['Количество'].loc[(sales_data['weekday'] == d)])
 
-    for k in dict(sorted(data_weekday.items(), key=lambda item: item[1], reverse=True)):
-        print(f'''День недели с наибольшим количеством продаж - {all_weekdays[k]}''')
-        break
+    data_hour = pd.DataFrame.from_dict(data_hour, orient='index').reset_index()
+    data_hour.columns = ['Час', 'Количество']
 
-    print(f'''Статистика часов по продажам:''')
-    for h in dict(sorted(data_hour.items(), key=lambda item: item[1], reverse=True)):
-        print(f'''{h} ч. - {data_hour[h]}''')
+    data_weekday = pd.DataFrame.from_dict(data_weekday, orient='index').reset_index()
+    data_weekday.columns = ['ДеньНедели', 'Количество']
+
+    print(f'''День недели с наибольшим количеством продаж - {(all_weekdays[int(data_weekday
+                                                                               .sort_values('Количество',
+                                                                                            ascending=False)
+                                                                               .head(1).values[0][0])])}''')
+
+    print(f'''Статистика часов по продажам:
+    {data_hour.sort_values('Количество', ascending=False).head()}''')
+
+    data_hour.plot(x='Час', y=['Количество'])
+    data_weekday.plot(x='ДеньНедели', y=['Количество'])
+    plt.show()
 
 
 if __name__ == '__main__':
-    Pool(cpu_count())
     print("Чтение вводных csv-файлов...")
+    Pool(cpu_count())
     start = timer()
     list_names_csv = ['t_branches', 't_cities', 't_products', 't_sales']
     dict_df_csv = dict()
@@ -147,9 +177,7 @@ if __name__ == '__main__':
 
     end = timer()
     print(f'''Время выполнения: {end - start}
-    ------------------------------------------------''')
-
-    # вариант с отбором по значению, без функции
+------------------------------------------------''')
     print("Нахождение уникальных складов/магазинов...")
     start = timer()
     branches_filter = branches.filter(['Ссылка', 'Наименование', 'Город']).sort_values('Наименование')
@@ -160,30 +188,29 @@ if __name__ == '__main__':
             branches_filter['warehouse'] == -1), ['Ссылка', 'Наименование']]
     end = timer()
     print(f'''Время выполнения: {end - start}
-    ------------------------------------------------''')
+------------------------------------------------''')
 
     print('Начало выполнения алгоритмов:')
     start = timer()
 
+    class_products(products_df=products, sales_df=sales)
+
     find_top(main_df=sales, objects_to_sort=branches_shop, name_col_main='Филиал', condition_top='Количество',
-                 for_last_msg='Десять первых магазинов по количеству продаж')
+             for_last_msg='Десять первых магазинов по количеству продаж')
 
     find_top(main_df=sales, objects_to_sort=branches_warehouse, name_col_main='Филиал', condition_top='Количество',
-                 for_last_msg='Десять первых складов по количеству продаж')
+             for_last_msg='Десять первых складов по количеству продаж')
 
     find_top(main_df=sales, objects_to_sort=products, name_col_main='Номенклатура', condition_top='Количество',
-                 products_from=True, from_df=branches_warehouse,
-                 for_last_msg='Десять самых продаваемых товаров по складам')
+             products_from=True, from_df=branches_warehouse, for_last_msg='Десять самых продаваемых товаров по складам')
 
     find_top(main_df=sales, objects_to_sort=products, name_col_main='Номенклатура', condition_top='Количество',
-                 products_from=True, from_df=branches_shop,
-                 for_last_msg='Десять самых продаваемых товаров по магазинам')
+             products_from=True, from_df=branches_shop, for_last_msg='Десять самых продаваемых товаров по магазинам')
 
-    find_top(main_df=sales, objects_to_sort=branches, name_col_main='Филиал', condition_top='Количество',
-                         city=True, city_df=cities,
-                         for_last_msg='Десять городов, в которых больше всего продавалось товаров')
+    find_top(main_df=sales, objects_to_sort=branches, name_col_main='Филиал', condition_top='Количество', city=True,
+             city_df=cities, for_last_msg='Десять городов, в которых больше всего продавалось товаров')
     find_top_time(sales)
 
     end = timer()
     print(f'''Общее время выполнения: {end - start}
-    ------------------------------------------------''')
+------------------------------------------------''')

@@ -1,4 +1,5 @@
 import numpy as np
+import pandas
 import pandas as pd
 
 from multiprocessing import Process, cpu_count, Pool
@@ -9,7 +10,6 @@ from tqdm import tqdm
 
 import datetime
 
-
 all_weekdays = {0: 'Понедельник',
                 1: 'Вторник',
                 2: 'Среда',
@@ -17,6 +17,8 @@ all_weekdays = {0: 'Понедельник',
                 4: 'Пятница',
                 5: 'Суббота',
                 6: 'Воскресенье'}
+
+tqdm.pandas()
 
 
 def csv_read(name_csv: str, test=False):
@@ -49,24 +51,24 @@ def definition_class(x, Qmin, Qmax):
 
 
 def class_products(products_df, sales_df):
+    print('Началась классификация товаров...')
     answer = pd.DataFrame({'Номенклатура': [], 'КоличестваПродаж': [], 'КлассТовара': [], 'index': []})
     answer['Номенклатура'] = products_df['Наименование']
     answer['index'] = products_df.index
     answer['КоличестваПродаж'] = (answer['index']
-                                  .apply(lambda l: int(np.sum(sales_df.loc[sales_df['Номенклатура']
+                                  .progress_apply(lambda l: int(np.sum(sales_df.loc[sales_df['Номенклатура']
                                                           .isin([products_df['Ссылка'][l]])
                                                           .pipe(lambda x: x.loc[pd.DataFrame(x)['Номенклатура']]
                                                                 .index)]
                                                           ['Количество']))))
 
-    print(answer.sort_values('КоличестваПродаж')['КоличестваПродаж'].values.tolist())
     min_quantile = answer['КоличестваПродаж'].quantile(.3)
     max_quantile = answer['КоличестваПродаж'].quantile(.9)
-    print(f'''{min_quantile} and {max_quantile}''')
     answer['КлассТовара'] = (answer['КоличестваПродаж']
-                             .apply(lambda x: definition_class(x, min_quantile, max_quantile)))
+                             .progress_apply(lambda x: definition_class(x, min_quantile, max_quantile)))
 
     csv_write(answer.drop(['КоличестваПродаж', 'index'], axis=1), 'product_classes')
+    print('Классификация товаров завершена!')
 
 
 def find_top(main_df: pd.DataFrame, objects_to_sort: pd.DataFrame, name_col_main: str, condition_top='Количество',
@@ -86,23 +88,27 @@ def find_top(main_df: pd.DataFrame, objects_to_sort: pd.DataFrame, name_col_main
     :param for_last_msg: пояснительное сообщение, для вывода лучших объектов
     """
     start_func = timer()
-    dict_for_answer = dict()
-    for l in tqdm(objects_to_sort.index):
-        # Нахождение всех строк,где продавался товар с index = l
-        if not products_from:
+    answer = pd.DataFrame({'Наименование': [], 'КоличестваПродаж': [], 'index': []})
+    answer['Наименование'] = objects_to_sort['Наименование']
+    answer['index'] = objects_to_sort.index
+    if products_from:
+        answer['КоличестваПродаж'] = (answer['index']
+                                      .progress_apply(lambda l: np.sum(main_df.loc[main_df[name_col_main]
+                                                              .isin([objects_to_sort[name_col_linc_on_objects][l]])
+                                                              .pipe(lambda x: x.loc[pd.DataFrame(x)[name_col_main]]
+                                                                    .index)]
+                                                              .pipe(lambda x: x.loc[(x['Филиал']
+                                                                                     .isin(from_df['Ссылка']))])
+                                                              [condition_top])))
+    elif city:
+        dict_for_answer = dict()
+        for l in tqdm(objects_to_sort.index):
+            # Нахождение всех строк,где продавался товар с index = l
             condition_data = (main_df.loc[main_df[name_col_main]
-                              .isin([objects_to_sort[name_col_linc_on_objects][l]])
-                              .pipe(lambda x: x.loc[pd.DataFrame(x)[name_col_main]].index)])
-        else:
-            condition_data = (main_df.loc[main_df[name_col_main]
-                              .isin([objects_to_sort[name_col_linc_on_objects][l]])
-                              .pipe(lambda x: x.loc[pd.DataFrame(x)[name_col_main]].index)]
-                              .pipe(lambda x: x.loc[(x['Филиал'].isin(from_df['Ссылка']))]))
+            .isin([objects_to_sort[name_col_linc_on_objects][l]])
+            .pipe(lambda x: x.loc[pd.DataFrame(x)[name_col_main]].index)])
 
-        sum_count = np.sum(condition_data[condition_top])
-        if products_from:
-            dict_for_answer[objects_to_sort['Наименование'][l]] = sum_count
-        elif city:
+            sum_count = np.sum(condition_data[condition_top])
             try:
                 key = (city_df.loc[(city_df['Ссылка'].isin(
                     objects_to_sort.loc[(objects_to_sort['Ссылка'].isin(condition_data['Филиал']))]
@@ -110,28 +116,38 @@ def find_top(main_df: pd.DataFrame, objects_to_sort: pd.DataFrame, name_col_main
             except IndexError:
                 continue
             dict_for_answer[key] = (dict_for_answer[key] + sum_count if key in dict_for_answer else sum_count)
-        else:
-            key = objects_to_sort['Наименование'][l]
-            dict_for_answer[key] = sum_count
-
-    result = pd.DataFrame.from_dict(dict_for_answer, orient='index').reset_index()
-    result.columns = ['Наименование', 'Количество']
-    end_func = timer()
-    print(f'''------------------------------------------------
-Время выполнения: {end_func - start_func}''')
-    print(f'''------------------------------------------------
+            answer = pd.DataFrame({'Наименование': dict_for_answer.keys(),
+                                   'КоличестваПродаж': dict_for_answer.values()})
+    else:
+        answer['КоличестваПродаж'] = (answer['index']
+                                      .progress_apply(lambda l: np.sum(main_df.loc[main_df[name_col_main]
+                                                              .isin([objects_to_sort[name_col_linc_on_objects][l]])
+                                                              .pipe(lambda x: x.loc[pd.DataFrame(x)[name_col_main]]
+                                                                    .index)]
+                                                              [condition_top])))
+    try:
+        result = answer.sort_values(['КоличестваПродаж'], ascending=False).drop('index', axis=1).head(len_top)
+    except KeyError:
+        result = answer.sort_values(['КоличестваПродаж'], ascending=False).head(len_top)
+    print(f'''======================================================
 {for_last_msg}
-------------------------------------------------
-{result.sort_values('Количество', ascending=False).head(len_top)}''')
+======================================================
+{result}''')
+    end_func = timer()
+    print(f'''======================================================
+Время выполнения: {end_func - start_func}''')
 
 
 def find_top_time(sales_main_df: pd.DataFrame):
+    start_func = timer()
+    print('Началась аналитика по времени')
     sales_data = pd.DataFrame({'weekday': [], 'hour': [], 'Количество': []})
-
+    print('Определение лучшего дня недели...')
     sales_data['weekday'] = (sales_main_df['Период']
-                             .apply(lambda x: datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').weekday()))
+                             .progress_apply(lambda x: datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').weekday()))
+    print('Определение лучших часов...')
     sales_data['hour'] = (sales_main_df['Период']
-                          .apply(lambda x: datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').time().hour))
+                          .progress_apply(lambda x: datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').time().hour))
     sales_data['Количество'] = sales_main_df['Количество']
 
     data_hour = dict()
@@ -153,8 +169,10 @@ def find_top_time(sales_main_df: pd.DataFrame):
                                                                                .head(1).values[0][0])])}''')
 
     print(f'''Статистика часов по продажам:
-    {data_hour.sort_values('Количество', ascending=False).head()}''')
-
+{data_hour.sort_values('Количество', ascending=False).head()}''')
+    end_func = timer()
+    print(f'''======================================================
+Время выполнения: {end_func - start_func}''')
     data_hour.plot(x='Час', y=['Количество'])
     data_weekday.plot(x='ДеньНедели', y=['Количество'])
     plt.show()
@@ -178,6 +196,8 @@ if __name__ == '__main__':
     end = timer()
     print(f'''Время выполнения: {end - start}
 ------------------------------------------------''')
+
+    # вариант с отбором по значению, без функции
     print("Нахождение уникальных складов/магазинов...")
     start = timer()
     branches_filter = branches.filter(['Ссылка', 'Наименование', 'Город']).sort_values('Наименование')
@@ -212,5 +232,5 @@ if __name__ == '__main__':
     find_top_time(sales)
 
     end = timer()
-    print(f'''Общее время выполнения: {end - start}
-------------------------------------------------''')
+    print(f'''Общее время работы(включая просмотр графиков): {end - start}
+    ------------------------------------------------''')
